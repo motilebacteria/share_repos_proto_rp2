@@ -1,0 +1,326 @@
+---
+title: "Proteomics IPA pathway analysis"
+author: "Johanna Willner"
+date: "2025-12-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Color scheme
+
+```{r color, echo=FALSE}
+
+olive  = c("#34431A", "#637430", "#949F37", "#C0BF31", "#D8D466", "#EFEDB0")
+green  = c("#18391A", "#246D36", "#458D41", "#62AA46", "#9DC376", "#D8E3C3")
+teal   = c("#01354A", "#006474", "#14939A", "#4FB3B3", "#94CCCD", "#CBE2E8")
+blue   = c("#192C57", "#0A4B83", "#056CA7", "#5791C3", "#9CC3E2", "#C7E2F5")
+purple = c("#46174D", "#76266D", "#A04A8B", "#B276AA", "#CEA4C8", "#E8D3E6")
+red    = c("#711311", "#972622", "#BD3B3B", "#D56362", "#E6A0A2", "#F5CCC8")
+orange = c("#7F3218", "#AF4E24", "#E06B25", "#ED9646", "#F6BC7D", "#F9DCBC")
+yellow = c("#685221", "#99752B", "#C69D2B", "#E3C24F", "#F1D687", "#FBEDC0")
+mud    = c("#615C48", "#858062", "#A7A083", "#C6BFA3", "#E4DDCA", "#F6F3EC")
+grey   = c("#1F2E43", "#47536B", "#6D788C", "#98A1B0", "#C8CCD8", "#E4E3E9")
+skin   = c("#422B1D", "#744D3C", "#906753", "#BC9578", "#DBB9A0", "#F5E2D3")
+
+```
+
+## Packages
+
+```{r packages, echo=FALSE}
+
+required_pkgs <- c("openxlsx",
+                   "tidyverse",
+                   "ggplot2",
+                   "sysfonts",
+                   "showtext",
+                   "patchwork",
+                   "knitr",
+                   "kableExtra", 
+                   "scales")
+
+for (pkg in required_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  if (!require(pkg, character.only = TRUE)) {
+    stop(paste("Failed to load package:", pkg))
+  }
+}
+
+
+```
+
+## Raw
+
+```{r raw}
+
+Raw_4d_synap =
+  read.xlsx(xlsxFile = "IPA_4d_syn_pathways.xlsx", colNames = TRUE)
+Raw_4d_cyto =
+  read.xlsx(xlsxFile = "IPA_4d_cyto_pathways.xlsx", colNames = TRUE)
+Raw_5d_synap =
+  read.xlsx(xlsxFile = "IPA_5d_syn_pathways.xlsx", colNames = TRUE)
+Raw_5d_cyto =
+  read.xlsx(xlsxFile = "IPA_5d_cyto_pathways.xlsx", colNames = TRUE)
+
+
+synap_4d <- Raw_4d_synap %>%
+  rename(
+    pvalue  = `-log(p-value)`,  
+    pathway = `Ingenuity.Canonical.Pathways`,
+    genes   = `Molecules`,
+    zscore  = `z-score`
+  ) %>%
+  mutate(
+    pvalue = pvalue %>%
+      gsub(",", ".", .) %>%             # , → .
+      gsub("√ó", "e", .) %>%            # √ó10^ → e
+      gsub("×", "e", .) %>%             # just in case correct × is present
+      gsub("10\\^", "", .),             # drop '10^'
+    pvalue = as.numeric(pvalue),
+    zscore = as.numeric(zscore),
+    ngenes = str_count(genes, ",") + 1
+  )
+cyto_4d <- Raw_4d_cyto %>%
+  rename(
+    pvalue  = `-log(p-value)`,  
+    pathway = `Ingenuity.Canonical.Pathways`,
+    genes   = `Molecules`,
+    zscore  = `z-score`
+  ) %>%
+  mutate(
+    pvalue = pvalue %>%
+      gsub(",", ".", .) %>%             # , → .
+      gsub("√ó", "e", .) %>%            # √ó10^ → e
+      gsub("×", "e", .) %>%             # just in case correct × is present
+      gsub("10\\^", "", .),             # drop '10^'
+    pvalue = as.numeric(pvalue),
+    zscore = as.numeric(zscore),
+    ngenes = str_count(genes, ",") + 1
+  )
+synap_5d <- Raw_5d_synap %>%
+  rename(
+    pvalue  = `-log(p-value)`,  
+    pathway = `Ingenuity.Canonical.Pathways`,
+    genes   = `Molecules`,
+    zscore  = `z-score`
+  ) %>%
+  mutate(
+    pvalue = pvalue %>%
+      gsub(",", ".", .) %>%             # , → .
+      gsub("√ó", "e", .) %>%            # √ó10^ → e
+      gsub("×", "e", .) %>%             # just in case correct × is present
+      gsub("10\\^", "", .),             # drop '10^'
+    pvalue = as.numeric(pvalue),
+    zscore = as.numeric(zscore),
+    ngenes = str_count(genes, ",") + 1
+  )
+cyto_5d <- Raw_5d_cyto %>%
+  rename(
+    pvalue  = `-log(p-value)`,  
+    pathway = `Ingenuity.Canonical.Pathways`,
+    genes   = `Molecules`,
+    zscore  = `z-score`
+  ) %>%
+  mutate(
+    pvalue = pvalue %>%
+      gsub(",", ".", .) %>%             # , → .
+      gsub("√ó", "e", .) %>%            # √ó10^ → e
+      gsub("×", "e", .) %>%             # just in case correct × is present
+      gsub("10\\^", "", .),             # drop '10^'
+    pvalue = as.numeric(pvalue),
+    zscore = as.numeric(zscore),
+    ngenes = str_count(genes, ",") + 1
+  )
+
+
+
+pathways_interest <- 
+  c("Synaptogenesis Signaling Pathway",
+  "Activation of NMDA receptors and postsynaptic events",
+  "Glutaminergic Receptor Signaling Pathway (Enhanced)",
+  "Insulin processing",
+  "Netrin Signaling",
+  "Amyotrophic Lateral Sclerosis Signaling",
+  "Transcriptional Regulation by MECP2",
+  "Protein Sorting Signaling Pathway",
+  "Opioid Signaling Pathway",
+  "Protein Ubiquitination Pathway")
+
+top_5synap_4d <- synap_4d %>%
+  filter(pathway %in% pathways_interest)
+
+top_5cyto_4d <- cyto_4d %>%
+  filter(pathway %in% pathways_interest)
+
+top_5synap_5d <- synap_5d %>%
+  filter(pathway %in% pathways_interest)
+
+top_5cyto_5d <- cyto_5d %>%
+  filter(pathway %in% pathways_interest)
+
+
+top_5synap_4d$pathway <- factor(top_5synap_4d$pathway, levels = pathways_interest)
+top_5cyto_4d$pathway <- factor(top_5cyto_4d$pathway, levels = pathways_interest)
+top_5synap_5d$pathway <- factor(top_5synap_5d$pathway, levels = pathways_interest)
+top_5cyto_5d$pathway <- factor(top_5cyto_5d$pathway, levels = pathways_interest)
+
+all_data <- bind_rows(top_5cyto_4d, top_5synap_4d, top_5cyto_5d, top_5synap_5d)
+
+min_p <- min(all_data$pvalue, na.rm = TRUE)
+max_p <- max(all_data$pvalue, na.rm = TRUE)
+min_z <- min(all_data$zscore, na.rm = TRUE)
+max_z <- max(all_data$zscore, na.rm = TRUE)
+max_ng<- max(all_data$ngenes, na.rm = TRUE)
+
+to_p_scale <- function(y2) {
+  slope_p <- (max_p - min_p) / (max_z - min_z)
+  intercept_p <- min_p - slope_p * min_z
+  return(slope_p * y2 + intercept_p)
+}
+
+to_z_scale <- function(y1) {
+  slope_z <- (max_z - min_z) / (max_p - min_p)
+  intercept_z <- min_z - slope_z * min_p
+  return(slope_z * y1 + intercept_z)
+}
+
+
+scale_max <- max(all_data$ngenes)
+```
+
+```{r function-plot}
+
+plot_IPA <- function(df,
+                     title){
+  
+  sysfonts::font_add(family = "Arial", regular = "C:/Windows/Fonts/arial.ttf")
+  showtext::showtext_auto()
+  
+
+p <-
+  ggplot(df, aes(x = pvalue,
+                 y = pathway)) +
+  geom_col(aes(fill = ngenes), linewidth = 0.8, colour = NA) +
+  geom_point(aes(
+    x = to_p_scale(zscore),
+    y = pathway),
+    color = "black",
+    size = 1, shape = 16) +
+  scale_fill_gradient(name = "n(genes)",
+                      low = skin[6], high = red[1],
+                          limits = c(1, scale_max)) +
+      scale_x_continuous(
+          name = "−log10(p-value)",
+          breaks = c(0, 2.5, 5, 7.5, 10, 12.5),
+          limits = c(0,(round(max_p)+0.5)),
+          sec.axis = sec_axis(transform = ~ to_z_scale(.),
+                     name = "Z-score")) +
+    labs(title = title) +
+    theme_minimal(base_family = "Arial", base_size = 20) +
+    theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.ticks.y = element_line(color = "black", linewidth = 0.2),
+      axis.line.x = element_line(color = "black", linewidth = 0.2),
+      axis.line.y = element_line(color = "black", linewidth = 0.2),
+      plot.margin = grid::unit(c(1,1,2,1), "cm"),
+      axis.text.x = element_text(size = 20),
+      axis.text.y = element_text(angle = 20, hjust = 1, size = 20),
+      axis.title.y = element_blank(),
+      plot.title = element_text(size = 30, face = "bold"),
+      legend.text = element_text(size = 20)
+    )
+  return(p)
+}
+```
+
+```{r plots, fig.height=8, fig.width=12}
+
+
+p_4d_cyto_top5  <- plot_IPA(df = top_5cyto_4d,
+                            title = "4d cyto")
+
+p_4d_synap_top5 <- plot_IPA(df = top_5synap_4d,
+                            title = "4d synap")
+
+p_5d_cyto_top5  <- plot_IPA(df = top_5cyto_5d,
+                            title = "5d cyto")
+
+p_5d_synap_top5  <- plot_IPA(df = top_5synap_5d,
+                            title = "5d synap")
+
+
+```
+
+```{r export-graphics,  exclude = TRUE, eval = FALSE}
+
+all_IPA_plot <-
+  ((p_4d_cyto_top5 | p_4d_synap_top5) /
+   (p_5d_cyto_top5 | p_5d_synap_top5)) +
+  plot_layout(guides = "collect", axes = "collect")
+
+ggsave("all_IPA_plots.jpg", all_IPA_plot, device = "jpeg",
+       dpi = 400, width = 35, height = 25, units = "cm")
+ggsave("all_IPA_plots.pdf", all_IPA_plot, device = "pdf",
+       dpi = 400, width = 75, height = 70, units = "cm", limitsize = FALSE)
+ggsave("all_IPA_plots.svg", all_IPA_plot, device = "svg",
+       dpi = 400, width = 35, height = 25, units = "cm")
+```
+
+```{r, exclude = TRUE, eval = FALSE}
+
+genes_IPA_4c <-  cyto_4d %>%
+  arrange(desc(pvalue)) %>%
+  slice_head(n=40) %>%
+  mutate(genes = stringr::str_split(genes, ",")) %>%
+  unnest(genes) %>%
+  pull(genes) %>%
+  str_trim() %>%  
+  unique()
+genes_IPA_4s <-  synap_4d %>%
+  arrange(desc(pvalue)) %>%
+  slice_head(n=40) %>%
+  mutate(genes = stringr::str_split(genes, ",")) %>%
+  unnest(genes) %>%
+  pull(genes) %>%
+  str_trim() %>%  
+  unique()
+
+genes_IPA_5c <-  cyto_5d %>%
+  arrange(desc(pvalue)) %>%
+  slice_head(n=40) %>%
+  mutate(genes = stringr::str_split(genes, ",")) %>%
+  unnest(genes) %>%
+  pull(genes) %>%
+  str_trim() %>%  
+  unique()
+genes_IPA_5s <-  synap_5d %>%
+  arrange(desc(pvalue)) %>%
+  slice_head(n=40) %>%
+  mutate(genes = stringr::str_split(genes, ",")) %>%
+  unnest(genes) %>%
+  pull(genes) %>%
+  str_trim() %>%  
+  unique()
+
+overlap_genes1   <- intersect(genes_IPA_4c, genes_IPA_5c)
+overlap_genes2   <- intersect(genes_IPA_4s, genes_IPA_5s)
+overlap_genes1_2 <- intersect(overlap_genes1, overlap_genes2)
+
+overlap_genescyto  <- intersect(shared_genes_cyto_down, shared_genes_cyto_up) #0
+overlap_genessynap <- intersect(shared_genes_synap_down, shared_genes_synap_up) #0
+
+overlap_genesc  <-
+  intersect(c(cyto_4d_up, cyto_5d_up, cyto_4d_down, cyto_5d_down),
+                             c(genes_IPA_4c, genes_IPA_5c)) #0
+overlap_geness  <-
+  intersect(c(synap_4d_up, synap_5d_up, synap_4d_down, synap_5d_down),
+                             c(genes_IPA_4s, genes_IPA_5s)) #0
+
+```

@@ -1,0 +1,1454 @@
+---
+title: "Proteomics processing and analysis with limma"
+author: "Johanna Willner"
+date: "2025-12-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Colors
+
+```{r colors}
+
+olive  = c("#34431A", "#637430", "#949F37", "#C0BF31", "#D8D466", "#EFEDB0")
+green  = c("#18391A", "#246D36", "#458D41", "#62AA46", "#9DC376", "#D8E3C3")
+teal   = c("#01354A", "#006474", "#14939A", "#4FB3B3", "#94CCCD", "#CBE2E8")
+blue   = c("#192C57", "#0A4B83", "#056CA7", "#5791C3", "#9CC3E2", "#C7E2F5")
+purple = c("#46174D", "#76266D", "#A04A8B", "#B276AA", "#CEA4C8", "#E8D3E6")
+red    = c("#711311", "#972622", "#BD3B3B", "#D56362", "#E6A0A2", "#F5CCC8")
+orange = c("#7F3218", "#AF4E24", "#E06B25", "#ED9646", "#F6BC7D", "#F9DCBC")
+yellow = c("#685221", "#99752B", "#C69D2B", "#E3C24F", "#F1D687", "#FBEDC0")
+mud    = c("#615C48", "#858062", "#A7A083", "#C6BFA3", "#E4DDCA", "#F6F3EC")
+grey   = c("#1F2E43", "#47536B", "#6D788C", "#98A1B0", "#C8CCD8", "#E4E3E9")
+skin   = c("#422B1D", "#744D3C", "#906753", "#BC9578", "#DBB9A0", "#F5E2D3")
+
+
+fill_colors <- c(
+    # 4d cyto
+    "4d_CNT_cyto_1" = olive[2], "4d_OPTN_cyto_1" = orange[2],
+    "4d_CNT_cyto_2" = olive[2], "4d_OPTN_cyto_2" = orange[2],
+    "4d_CNT_cyto_3" = olive[2], "4d_OPTN_cyto_3" = orange[2],
+    # 4d synap
+    "4d_CNT_synap_1" = green[2], "4d_OPTN_synap_1" = red[2],
+    "4d_CNT_synap_2" = green[2], "4d_OPTN_synap_2" = red[2],
+    "4d_CNT_synap_3" = green[2], "4d_OPTN_synap_3" = red[2],
+    # 5d synap
+    "5d_CNT_cyto_1" = olive[3], "5d_OPTN_cyto_1" = orange[3],
+    "5d_CNT_cyto_2" = olive[3], "5d_OPTN_cyto_2" = orange[3],
+    "5d_CNT_cyto_3" = olive[3], "5d_OPTN_cyto_3" = orange[3],
+    # 5d synap
+    "5d_CNT_synap_1" = green[3], "5d_OPTN_synap_1" = red[3],
+    "5d_CNT_synap_2" = green[3], "5d_OPTN_synap_2" = red[3],
+    "5d_CNT_synap_3" = green[3], "5d_OPTN_synap_3" = red[3],
+    # 6d synap
+    "6d_CNT_cyto_1" = olive[4], "6d_OPTN_cyto_1" = orange[4],
+    "6d_CNT_cyto_2" = olive[4], "6d_OPTN_cyto_2" = orange[4],
+    "6d_CNT_cyto_3" = olive[4], "6d_OPTN_cyto_3" = orange[4],
+    # 6d synap
+    "6d_CNT_synap_1" = green[4], "6d_OPTN_synap_1" = red[4],
+    "6d_CNT_synap_2" = green[4], "6d_OPTN_synap_2" = red[4],
+    "6d_CNT_synap_3" = green[4], "6d_OPTN_synap_3" = red[4]
+  )
+
+QCfill = grey[3]
+screefill = grey[3]
+downfill = purple[1]
+upfill = blue[1]
+nsfill = grey[5]
+vennfillup   = c("4d up cyto"    = blue[5],   "4d up synap"   = teal[5],
+                 "5d up cyto"    = blue[6],   "5d up synap"   = teal[6])
+vennfilldown = c("4d down cyto"  = purple[5], "4d down synap" = yellow[5],
+                 "5d down cyto"  = purple[6], "5d down synap" = yellow[6])
+```
+
+## Packages
+
+```{r packages, warning = FALSE, error = FALSE, message = FALSE}
+
+
+required_pkgs <- c("tidyverse",
+                   "tidyr",
+                   "dplyr",
+                   "BiocManager",
+                   "readr",
+                   "stringr",
+                   "plotly",
+                   "ggplot2",
+                   "patchwork",
+                   "grid",
+                   "knitr",
+                   "sysfonts",
+                   "showtext",
+                   "htmlwidgets",
+                   "UpSetR",
+                   "eulerr",
+                   "tibble",
+                   "orthogene",
+                   "grr",
+                   "purrr",
+                   "ggrepel")
+
+bioc_pkgs <- c("limma",
+               "impute",
+               "UniProt.ws",
+               "pcaMethods")
+
+
+#CRAN packages
+for (pkg in required_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+
+#Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+for (pkg in bioc_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg, ask = FALSE, update = FALSE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+
+```
+
+## Read in raw data and tidy up for use
+
+```{r raw}
+
+raw <- read.delim("4d_5d_normalized_prot.tsv", sep = "\t", header = TRUE)
+```
+
+```{r function-parsenames, include = FALSE}
+
+parse_colname <- function(x) {
+  if (!stringr::str_detect(x, "^X\\.")) return(NULL)
+  
+  # replicate
+  rep <- case_when(
+    stringr::str_detect(x, "_I_")   ~ 1L,
+    stringr::str_detect(x, "_II_")  ~ 2L,
+    stringr::str_detect(x, "_III_") ~ 3L,
+    TRUE ~ NA_integer_
+  )
+  
+  # batch (early vs RI run)
+  batch <- case_when(
+    stringr::str_detect(x, "_2025\\.10\\.15_") ~ "5d",
+    stringr::str_detect(x, "_2025\\.12\\.1[0-1]_") ~ "4d",
+    TRUE ~ NA_character_
+  )
+  
+  # genotype
+  genotype <- case_when(
+    stringr::str_detect(x, "ContC|ContS|Contr_") ~ "CNT",
+    stringr::str_detect(x, "OptnC|OptnS|OPTN_")  ~ "OPTN",
+    TRUE ~ NA_character_
+  )
+  
+  # fraction
+  fraction <- case_when(
+    stringr::str_detect(x, "ContC|OptnC|_cyto_") ~ "cyto",
+    stringr::str_detect(x, "ContS|OptnS|_syn_")  ~ "synap",
+    TRUE ~ NA_character_
+  )
+  
+  # metric
+  metric <- case_when(
+    stringr::str_detect(x, "RunEvidenceCount$")                    ~ "RunEvCount",
+    stringr::str_detect(x, "NrOfPrecursorsUsedForQuantification$") ~ "PrecursorQuant",
+    stringr::str_detect(x, "MS1Quantity$")                         ~ "MS1",
+    stringr::str_detect(x, "MS2Quantity$")                         ~ "MS2",
+    TRUE ~ NA_character_
+  )
+  
+  if (any(is.na(c(rep, batch, genotype, fraction, metric)))) return(NULL)
+  
+  new_name <- paste(batch, genotype, fraction, rep, metric, sep = "_")
+  
+  tibble(
+    old_name = x,
+    batch = batch,
+    genotype = genotype,
+    fraction = fraction,
+    replicate = rep,
+    metric = metric,
+    new_name = new_name
+  )
+}
+
+
+```
+
+```{r function-mapgene, include = FALSE}
+
+annotate_proteins_uniprot <- function(raw_df,
+                                      tax_id = 10090,
+                                      remove_suffix = "_MOUSE$",
+                                      proteinID) {
+  
+  # 1) separate primary and alternative accessions
+  data <- raw_df %>%
+    separate(
+      proteinID,
+      into = c("proteinID", "alternative.proteinID"),
+      sep = ";",
+      fill = "right",
+      extra = "merge"
+    )
+  
+  # 2) UniProt mapping
+  upID <- UniProt.ws(taxId = tax_id)
+  accessions <- as.character(data$proteinID)
+  
+  mapped <- mapUniProt(
+    from  = "UniProtKB_AC-ID",
+    to    = "UniProtKB",
+    query = accessions
+  )
+  
+  mapped <- mapped %>%
+    rename(proteinID = Entry)
+  
+  data <- data %>%
+    rename(descriptions = PG.ProteinDescriptions)
+  
+  
+  # 3) join mapping back
+  data_ann <- data %>%
+    left_join(mapped[, c("proteinID", "Entry.Name", "Gene.Names")],
+              by = "proteinID")
+  
+  # 4) reorder columns if present
+  core_cols <- c(
+    "proteinsID",
+    "Entry.Name",
+    "Gene.Names",
+    "descriptions"
+  )
+  
+  cols_present <- intersect(core_cols, names(data_ann))
+  
+  data_ann <- data_ann %>%
+    dplyr::select(all_of(cols_present), everything())
+  
+  # 5) clean Entry.Name suffix if requested
+  if (!is.null(remove_suffix) && remove_suffix != "") {
+    data_ann <- data_ann %>%
+      mutate(Entry.Name = str_remove(Entry.Name, remove_suffix))
+  }
+  
+  
+  list(
+    data = data_ann,
+    mapping = mapped
+  )
+}
+
+
+```
+
+```{r rename columns}
+
+all_cols <- colnames(raw)
+
+parsed <- purrr::map_dfr(all_cols, parse_colname)
+
+raw_renamed <- raw
+idx <- match(parsed$old_name, names(raw_renamed))
+names(raw_renamed)[idx] <- parsed$new_name
+
+```
+
+```{r mapgene}
+
+anno <- annotate_proteins_uniprot(raw_df = raw_renamed,
+                                  tax_id = 10090,
+                                  remove_suffix = "_MOUSE$",
+                                  proteinID = "PG.ProteinAccessions")
+data <- anno$data
+mapping <- anno$mapping   # optional backup / diagnostics
+
+
+```
+
+```{r function-cleandata}
+
+# GLOBAL
+global_clean <- function(data) {
+
+  message("Handling duplicate / missing gene names\n")
+  duplicates <- data[duplicated(data$Gene.Names) |
+                       duplicated(data$Gene.Names, fromLast = TRUE), ]
+  duplicated_genes <- unique(data$Gene.Names[duplicated(data$Gene.Names)])
+  message("This dataset contains ", nrow(duplicates),
+          " duplicates in Gene.Names\n")
+  if (length(duplicated_genes) > 0) {
+    message("Duplicated gene names: ",
+            paste(duplicated_genes, collapse = ", "), "\n")
+  }
+  
+  ix <- as.integer(rownames(duplicates))
+  data$Gene.Names[ix] <- data$Entry.Name[ix]
+  rownames(data) <- data$Gene.Names
+  
+  message("-------------------------------------------------------------")
+  message("This dataset contains ", nrow(data), " proteins\n")
+  message("-------------------------------------------------------------\n")
+  
+  message("Removing contaminations\n")
+  
+  keratins <- grep("keratin", data$descriptions, ignore.case = TRUE)
+  if (length(keratins) > 0) data <- data[-keratins, ]
+  message(length(keratins), " keratin proteins removed\n")
+  
+  album <- grep("album", data$descriptions, ignore.case = TRUE)
+  if (length(album) > 0) data <- data[-album, ]
+  message(length(album), " albumin proteins removed\n")
+  
+  trypsin <- grep("trypsin", data$descriptions, ignore.case = TRUE)
+  if (length(trypsin) > 0) data <- data[-trypsin, ]
+  message(length(trypsin), " trypsin proteins removed\n\n")
+  
+  return(data)
+}
+
+
+# SUBSETS
+
+clean_subset <- function(data,
+                         batch,
+                         fraction,
+                         metric = "MS1",
+                         namecols = c("Entry.Name",
+                                      "Gene.Names",
+                                      "descriptions",
+                                      "PG.Pvalue",
+                                      "PG.Qvalue",
+                                      "PG.Cscore",
+                                      "proteinID")) {
+  
+   key <- paste(batch, fraction, sep = "_")
+  message("=== Processing subset: ", key, " ===\n")
+  
+  # 1) identify MS1 columns for this subset (this is the subset definition)
+  pattern_ms1 <- paste0("^", batch, "_.*_", fraction, "_[0-9]+_", metric, "$")
+  ms1_cols <- grep(pattern_ms1, colnames(data), value = TRUE)
+  
+  if (length(ms1_cols) == 0L) {
+    stop("No MS1 columns found for subset ", key)
+  }
+  
+  # derive matching MS2 / RunEv / Precursor columns
+  base           <- sub(paste0("_", metric, "$"), "", ms1_cols)
+  ms2_cols       <- paste0(base, "_MS2")
+  runev_cols     <- paste0(base, "_RunEvCount")
+  precursor_cols <- paste0(base, "_PrecursorQuant")
+  
+  ms2_cols       <- intersect(ms2_cols, colnames(data))
+  runev_cols     <- intersect(runev_cols, colnames(data))
+  precursor_cols <- intersect(precursor_cols, colnames(data))
+  
+  # 2) create the actual subset data frame:
+  #    all rows, only metadata + cols for this subset
+  subset_cols <- c(namecols, ms1_cols, ms2_cols, runev_cols, precursor_cols)
+  subset_cols <- intersect(subset_cols, colnames(data))
+  
+  data <- data[, subset_cols, drop = FALSE]
+  
+  
+  # 3) statistical filters (only within this subset)
+  message("Removing proteins with low statistical power in subset ", key, "\n")
+  
+  Pvalue <- data %>% filter(PG.Pvalue < 0.05)
+  message(nrow(data) - nrow(Pvalue),
+          " proteins with p >= 0.05 removed\n")
+  
+  Qvalue <- Pvalue %>% filter(PG.Qvalue < 0.01)
+  message(nrow(Pvalue) - nrow(Qvalue),
+          " proteins with Q >= 0.01 removed\n")
+  
+  Cscore <- Qvalue %>% filter(PG.Cscore >= 3)
+  message(nrow(Qvalue) - nrow(Cscore),
+          " proteins with C-score < 3 removed\n")
+  
+  evid <- Cscore %>%
+    filter(rowSums(.[, runev_cols] >= 2, na.rm = TRUE) > 0)
+  message(nrow(Cscore) - nrow(evid),
+          " proteins with run evidence counts < 2 removed\n")
+  
+  prec <- evid %>%
+    filter(rowSums(.[, precursor_cols] >= 2, na.rm = TRUE) > 0)
+  message(nrow(evid) - nrow(prec),
+          " proteins with < 2 precursors removed\n")
+  
+  #intensity_threshold <- quantile(as.matrix(prec[, ms1_cols]),
+  #                                0.05, na.rm = TRUE)
+  #intensities <- prec %>%
+  #  filter(rowSums(.[, ms1_cols] >= intensity_threshold,
+  #                 na.rm = TRUE) > 0)
+  #message(nrow(prec) - nrow(intensities),
+  #        " proteins with MS1 in lower 5% removed\n\n")
+  
+  data <- prec
+  
+  # 3) set intensities to numeric
+  data[, c(ms1_cols, ms2_cols)] <- lapply(
+    data[, c(ms1_cols, ms2_cols), drop = FALSE],
+    as.numeric
+  )
+  
+  data_full_cleaned <- data
+  
+  # 4) subset to Gene.Names + MS1, rename columns
+  message("Subsetting Gene.Names and MS1 columns for ", key, "\n")
+  data_sub <- data %>%
+    dplyr::select(Gene.Names, all_of(ms1_cols))
+  
+  colnames(data_sub)[match(ms1_cols, colnames(data_sub))] <-
+    sub(paste0("_", metric, "$"), "", ms1_cols)
+  
+  ms1_base <- setdiff(colnames(data_sub), "Gene.Names")
+  data_clean_raw <- data_sub
+  
+  # 5) log2 transform
+  message("Log2 transform MS1 intensities\n\n")
+  data_sub[, ms1_base] <- log2(pmax(data_sub[, ms1_base], 1))
+  
+  data_pca <- data_sub %>%
+    dplyr::select(all_of(ms1_base))
+  
+  # 6) bpca imputation
+  message("Bayesian PCA imputation for ", key, "\n")
+  bpca_impute <- function(df, nPcs = 6) {
+    mat <- as.matrix(df)
+    fit <- pca(mat, method = "bpca", nPcs = nPcs)
+    completeObs(fit)
+  }
+  data_bpca <- bpca_impute(data_pca, nPcs = 5)
+  
+  data_pca_mat <- t(data_bpca)
+  
+  # 7) pivot long for QC plots
+  message("Pivot cleaned dataset to long format for ", key, "\n")
+  data_piv <- data_sub %>%
+    dplyr::select(-Gene.Names) %>%
+    tibble::rownames_to_column(var = "gene_names") %>%
+    tidyr::pivot_longer(
+      cols = -gene_names,
+      names_to = "sample",
+      values_to = "intensities"
+    )
+  
+  results  <- list(
+    batch              = batch,
+    fraction           = fraction,
+    data_full_cleaned  = data_full_cleaned,
+    data_clean_raw     = data_clean_raw,
+    data_bpca          = data_bpca,
+    data_pca_mat       = data_pca_mat,
+    data_piv           = data_piv
+  )
+  return(results)
+}
+
+```
+
+```{r cleandata, results = "hide", collapse = TRUE, echo = FALSE}
+
+data_globalclean <- global_clean(data)
+
+
+data_5d_cyto <- clean_subset(data = data_globalclean,
+                         batch = "5d",
+                         fraction = "cyto")
+
+data_5d_synap <- clean_subset(data = data_globalclean,
+                         batch = "5d",
+                         fraction = "synap")
+
+data_4d_cyto  <- clean_subset(data_globalclean,
+                         batch = "4d",
+                         fraction = "cyto")
+
+data_4d_synap <- clean_subset(data_globalclean,
+                         batch = "4d",
+                         fraction = "synap")
+
+```
+
+The subset datasets now contain
+
+-   **`batch`** and **`fraction`**: metadata scalars (e.g. **`"5d"`**, **`"cyto"`**).
+
+-   **`data_full_cleaned`**: data frame after **all statistical filters** (P\<0.05, Q\<0.01, C-score≥3, RunEv≥2, precursors≥2, MS1\>5th percentile). Contains metadata columns + MS1/MS2/RunEv/Precursor columns for this subset only.
+
+-   **`data_clean_raw`**: data frame with **only** **`Gene.Names`** + MS1 intensity columns for this subset. Columns renamed without **`_MS1`** suffix (e.g. **`5d_CNT_cyto_1`** instead of **`5d_CNT_cyto_1_MS1`**). Still raw intensities (pre-log2).
+
+-   **`data_bpca`**: **matrix** after log2 transformation + bPCA imputation. Shape: **proteins (rows) × samples (columns)**.
+
+-   **`data_pca_mat`**: **transposed matrix** for PCA. Shape: **samples (rows) × proteins (columns)**.
+
+-   **`data_piv`**: **long tibble** for QC plots and limma.
+
+## Quality Control & PCA
+
+```{r function-distributions, include = FALSE}
+
+
+plot_signal_intensity_dis <- function(dataset, title){
+  
+  sysfonts::font_add(family = "Arial", regular = "C:/Windows/Fonts/arial.ttf")
+  showtext::showtext_auto()
+
+
+  dataset$sample <- factor(dataset$sample,
+                           levels = unique(as.character(dataset$sample)))
+
+
+  box <-
+    ggplot(dataset, aes(x = sample, y = intensities)) +
+    geom_boxplot(fill = QCfill, color = "black") + 
+    geom_jitter(size = 0.1, color = "black", alpha = 0.6,
+                position = position_jitter(0.1)) +
+    labs(title = title,
+         x = "Sample",
+         y = "signal intensity") +
+    theme_minimal(base_family = "Arial") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  hist <-
+    ggplot(dataset, aes(x = intensities)) +
+    geom_histogram(bins = 100, fill = QCfill, color = "black") +
+    labs(title = title, x = "intensities") +
+    theme_minimal(base_family = "Arial")
+  
+  return(list(box = box, hist = hist))
+                          
+}
+```
+
+```{r function-density, include = FALSE}
+
+plot_intensity_density <- function(dataset, title){
+  
+  sysfonts::font_add(family = "Arial", regular = "C:/Windows/Fonts/arial.ttf")
+  showtext::showtext_auto()
+  
+  dataset$sample <- factor(dataset$sample, 
+                        levels = unique(as.character(dataset$sample)))
+  
+  available_samples <- base::intersect(names(fill_colors), levels(dataset$sample))
+  fill_colors_dens <- fill_colors[available_samples]
+  sample_colors <- setNames(fill_colors_dens, unique(dataset$sample))
+
+  dataset$sample <- factor(dataset$sample, 
+                        levels = unique(as.character(dataset$sample)))
+
+  plot <-
+    ggplot(dataset, aes(x = intensities,
+                      color = sample)) +
+    geom_density(linewidth = 0.5, alpha = 0.7) +  
+    scale_color_manual(values = sample_colors) +
+    theme_minimal(base_size = 10, base_family = "Arial") +
+    labs(title = title, x = "intensities", y = "density") +
+    guides(guide_legend(override.aes = list(size = 3, shape = 16)))
+  
+  return(plot)
+}
+```
+
+```{r function-PCA, include = FALSE}
+
+run_pca_analysis <- function(data_matrix, plot_title, na_method) {
+  
+  #fetching font
+  sysfonts::font_add(family = "Arial", regular = "C:/Windows/Fonts/arial.ttf")
+  showtext::showtext_auto()
+  
+  # Run PCA on input matrix
+  pca_obj <- prcomp(data_matrix, center = TRUE, scale. = TRUE)
+  
+  # Print summary
+  print(summary(pca_obj))
+  
+  # Scree plot data
+  scree_df <- data.frame(
+    PC = colnames(pca_obj$x),
+    Variance = pca_obj$sdev^2,
+    Proportion = pca_obj$sdev^2 / sum(pca_obj$sdev^2),
+    Cumulative = cumsum(pca_obj$sdev^2 / sum(pca_obj$sdev^2))
+  )
+  
+  
+  # Scree plot
+  p_scree <-
+    ggplot(scree_df, aes(x = reorder(PC, 1:nrow(scree_df)), y = Proportion)) +
+    geom_line(color = screefill, size = 1) +
+    geom_point(color = screefill, size = 3) +
+    geom_vline(xintercept = which(scree_df$Cumulative >= 0.8)[1],
+               linetype = "dashed", color = screefill) +
+    labs(title = paste("Scree Plot: PC Variance Explained (red>= 0.8)", na_method),
+         x = "Principal Component", y = "Proportion of Variance") +
+    theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # PCA data frame with metadata
+  pca_df <- as.data.frame(pca_obj$x)
+  pca_df$Sample <- rownames(pca_df)
+  
+  # Factors and colors
+  pca_df$Sample <- factor(pca_df$Sample, levels = sort(unique(pca_df$Sample)))
+  
+  
+  available_samples <- base::intersect(names(fill_colors), levels(pca_df$Sample))
+  fill_colors_pca <- fill_colors[available_samples]
+  
+  pca_df$Sample <- factor(pca_df$Sample, levels = available_samples)
+  
+  # PCA plot
+  pca_plot <-
+    ggplot(pca_df, aes(x = PC1, y = PC2, color = Sample, fill = Sample)) +
+    geom_point(shape = 21, size = 4) +
+    scale_color_manual(values = fill_colors_pca) +
+    scale_fill_manual(values = fill_colors_pca) +
+    labs(title = paste(plot_title, na_method)) +
+    theme_minimal(base_family = "Arial", base_size = 12) +
+    theme(
+      panel.grid.major.y = element_blank(), panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(), axis.ticks.x = element_blank(),
+      axis.ticks.y = element_line(color = "black", linewidth = 0.6),
+      axis.line.x = element_line(color = "black", linewidth = 0.6),
+      axis.line.y = element_line(color = "black", linewidth = 0.6),
+      axis.title.x = element_text(size = 12, margin = margin(t = 12)),
+      legend.title = element_blank(), plot.margin = grid::unit(c(1,1,1,1), "cm"),
+      axis.text.x = element_text(size = 12),
+      axis.title.y = element_text(size = 12, margin = margin(r = 12)),
+      plot.title = element_text(size = 14, face = "bold", margin = margin(b = 12)),
+      legend.text = element_text(size = 10)
+    )
+  
+  # Combined plot (scree top, PCA bottom)
+  combined_plot <- p_scree / pca_plot
+  
+  
+  return(list(pca_obj = pca_obj,
+              pca_df = pca_df, scree_df = scree_df,
+              scree_plot = p_scree, pca_plot = pca_plot,
+              combined_plot = combined_plot))
+}
+
+```
+
+```{r function-mediansweep, include = FALSE}
+
+median_sweep <- function(data_mat) {
+  col_median <- apply(data_mat, 2, median, na.rm = TRUE)
+  sweep(data_mat, 2, col_median, FUN = "-")
+}
+
+median_sweep_pipeline <- function(subset_result) {
+  batch <- subset_result$batch
+  fraction <- subset_result$fraction
+  key <- paste(batch, fraction, sep = "_")
+  
+  message("Median sweep normalization for ", key, "\n")
+  
+  # 1) Normalize the bPCA-imputed matrix (proteins × samples)
+  data_swept <- median_sweep(subset_result$data_bpca)
+  
+  # 2) Transpose for PCA (samples × proteins) 
+  data_pca_swept <- t(data_swept)
+  
+  # 3) Pivot long for QC plots
+  data_piv_swept <- data_swept %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "gene_names") %>%
+    pivot_longer(
+      cols = -gene_names,
+      names_to = "sample",
+      values_to = "intensities"
+    )
+  
+  list(
+    data_swept      = data_swept,      # proteins × samples (normalized)
+    data_pca_swept  = data_pca_swept,  # samples × proteins (for PCA)
+    data_piv_swept  = data_piv_swept   # long format (for QC plots)
+  )
+}
+```
+
+```{r mediansweep}
+
+norm_5d_cyto <- median_sweep_pipeline(data_5d_cyto)
+norm_5d_synap <- median_sweep_pipeline(data_5d_synap)
+norm_4d_cyto <- median_sweep_pipeline(data_4d_cyto)
+norm_4d_synap <- median_sweep_pipeline(data_4d_synap)
+```
+
+```{r function-QCplots, include = FALSE}
+
+plot_qc <- function(data_piv_pre, data_piv_post, title) {
+  
+  # Individual plots
+  pre_boxhist <- plot_signal_intensity_dis(data_piv_pre, paste(title, "pre"))
+  post_boxhist <- plot_signal_intensity_dis(data_piv_post, paste(title, "post"))
+  pre_dens <- plot_intensity_density(data_piv_pre, paste(title, "pre"))
+  post_dens <- plot_intensity_density(data_piv_post, paste(title, "post"))
+  
+  # Distribution panel (boxplots + histograms)
+  distribution <- ((pre_boxhist$box | pre_boxhist$hist) / 
+                   (post_boxhist$box | post_boxhist$hist)) +
+    plot_layout(axes = "collect", axis_titles = "collect") +
+    plot_annotation(title = 'Signal intensity distributions')
+  
+  # Density panel
+  density <- (pre_dens / post_dens) +
+    plot_layout(guides = "collect", axis_titles = "collect", axes = "collect") +
+    plot_annotation(title = "Signal intensity density")
+  
+  # Combined layout
+  combined <- (distribution | density) +
+    plot_layout(ncol = 2, nrow = 1, heights = c(1, 2), widths = c(2, 1)) +
+    plot_annotation(
+      title = paste(title, "- Normalization QC"),
+    )
+  
+  return(combined)
+}
+```
+
+```{r function-PCAplot, include = FALSE}
+
+plot_pca_comparison <- function(data_pca_pre, 
+                                data_pca_post, 
+                                title) {
+  
+  # Individual PCA analyses
+  result_pre <- run_pca_analysis(
+    data_matrix = data_pca_pre,
+    plot_title  = paste(title, "pre-sweep"),
+    na_method   = "bPCA imputed"
+  )
+  
+  result_post <- run_pca_analysis(
+    data_matrix = data_pca_post,
+    plot_title  = paste(title, "post-sweep"),
+    na_method   = "bPCA + median sweep"
+  )
+  
+  # Small text theme (your exact theme)
+  small_text_theme <- theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.4),
+    axis.line.x = element_line(color = "black", linewidth = 0.4),
+    axis.line.y = element_line(color = "black", linewidth = 0.4),
+    axis.title.x = element_text(size = 7, margin = margin(t = 5)),
+    axis.title.y = element_text(size = 7, margin = margin(r = 5)),
+    axis.text.x = element_text(size = 6),
+    axis.text.y = element_text(size = 6),
+    plot.title = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    plot.margin = grid::unit(c(3, 3, 3, 3), "mm"),
+    legend.margin = margin(0, 0, 0, 0),
+    legend.key.size = unit(0.7, "lines")
+  )
+  
+  # Combined layout (your exact patchwork)
+  combined_pca <- (result_pre$scree_plot | result_post$scree_plot) /
+    (result_pre$pca_plot | result_post$pca_plot) +
+    plot_layout(
+      heights = c(1, 1.5), 
+      widths = c(1, 1),
+      guides = "collect", 
+      axis_titles = "collect",
+      axes = "collect"
+    ) +
+    plot_annotation(
+      title = paste("PCA -", title),
+      subtitle = "Top: Scree plots | Bottom: PC1 vs PC2\nLeft: pre-sweep | Right: post-sweep"
+    ) &
+    small_text_theme &
+    guides(shape = guide_legend(override.aes = list(size = 2, stroke = 0.5)))
+  
+  return(combined_pca)
+}
+```
+
+```{r QCplots, fig.height=8, fig.width=12, warning=FALSE}
+
+
+qc_5d_cyto <- plot_qc(
+  data_piv_pre   = data_5d_cyto$data_piv,
+  data_piv_post  = norm_5d_cyto$data_piv_swept,
+  title          = "5d cyto"
+)
+qc_5d_cyto
+
+qc_5d_synap <- plot_qc(
+  data_piv_pre   = data_5d_synap$data_piv,
+  data_piv_post  = norm_5d_synap$data_piv_swept,
+  title          = "5d synap"
+)
+qc_5d_synap
+
+qc_4d_cyto <- plot_qc(
+  data_piv_pre   = data_4d_cyto$data_piv,
+  data_piv_post  = norm_4d_cyto$data_piv_swept,
+  title          = "4d cyto"
+)
+qc_4d_cyto
+
+qc_4d_synap <- plot_qc(
+  data_piv_pre   = data_4d_synap$data_piv,
+  data_piv_post  = norm_4d_synap$data_piv_swept,
+  title          = "4d synap"
+)
+qc_4d_synap
+```
+
+```{r PCA,fig.height=8, fig.width=12, warning = FALSE}
+
+pca_5d_cyto <- plot_pca_comparison(
+  data_pca_pre  = data_5d_cyto$data_pca_mat,
+  data_pca_post = norm_5d_cyto$data_pca_swept,
+  title         = "5d cyto"
+)
+pca_5d_cyto
+
+pca_5d_synap <- plot_pca_comparison(
+  data_pca_pre  = data_5d_synap$data_pca_mat,
+  data_pca_post = norm_5d_synap$data_pca_swept,
+  title         = "5d synap"
+)
+pca_5d_synap
+
+pca_4d_cyto <- plot_pca_comparison(
+  data_pca_pre  = data_4d_cyto$data_pca_mat,
+  data_pca_post = norm_4d_cyto$data_pca_swept,
+  title         = "4d cyto"
+)
+pca_4d_cyto
+
+pca_4d_synap <- plot_pca_comparison(
+  data_pca_pre  = data_4d_synap$data_pca_mat,
+  data_pca_post = norm_4d_synap$data_pca_swept,
+  title         = "4d synap"
+)
+pca_4d_synap
+
+```
+
+```{r PCA-all, fig.height=8, fig.width=12}
+
+combined_df <- bind_rows(
+  as_tibble(norm_5d_cyto$data_pca_swept, rownames = "set"),
+  as_tibble(norm_5d_synap$data_pca_swept, rownames = "set"),
+  as_tibble(norm_4d_cyto$data_pca_swept, rownames = "set"),
+  as_tibble(norm_4d_synap$data_pca_swept, rownames = "set")
+)
+
+# set as rownames again, drop column, and fill NAs with 0
+combined_mat <- combined_df %>%
+  column_to_rownames("set") %>%
+  as.matrix()
+
+combined_mat[is.na(combined_mat)] <- 0
+
+
+pca_combined <- run_pca_analysis(data_matrix = combined_mat,
+                 plot_title = "PCA complete dataset 4d + 5d",
+                 na_method = "bPCA + median-sweep + missing replaced with 0")
+
+pca_combined$scree_plot / pca_combined$pca_plot + plot_layout(guides = "collect")
+```
+
+## Limma & Volcano plots
+
+```{r function-limma, include=FALSE}
+
+run_limma_subset <- function(data_mat, 
+                             batch, 
+                             fraction, 
+                             logFC_threshold = 0.25,
+                             adjP_threshold = 0.05) {
+  
+  key <- paste(batch, fraction, sep = "_")
+  message("Running limma for ", key, "\n")
+  
+  # Derive sample_info from colnames
+  colnames_data <- colnames(data_mat)
+  sample_info <- data.frame(
+    sample_id = colnames_data,
+    stringsAsFactors = FALSE) %>%
+    separate(sample_id,
+             into = c("batch", "genotype", "fraction", "replicate"), 
+             sep = "_", remove = FALSE) %>%
+    mutate(
+      group = paste(genotype, fraction, sep = "_")  
+    )
+  
+  rownames(sample_info) <- sample_info$sample_id
+  sample_info <- sample_info  %>% dplyr::select(- sample_id)
+  sample_info$genotype <- as.factor(sample_info$genotype)
+  
+  # group names
+  cnt_group <- paste(levels(sample_info$genotype)[1], fraction,
+                     sep = "_")   
+  optn_group <- paste(levels(sample_info$genotype)[2], fraction,
+                      sep = "_")
+  
+  
+  
+  # Design matrix
+  design <- model.matrix(~ 0 + group, data = sample_info)
+  colnames(design) <- levels(as.factor(sample_info$group))
+  
+  # Limma fit
+  exprs_mat <- as.matrix(data_mat)
+  rownames(exprs_mat) <- rownames(data_mat)
+  
+  fit1 <- lmFit(exprs_mat, design)
+  
+  contrast.matrix <- makeContrasts(
+    contrasts = paste0(optn_group, " - ", cnt_group),
+    levels = design)
+  colnames(contrast.matrix) <- "CNTvsOPTN"
+  
+  fit2 <- contrasts.fit(fit1, contrast.matrix)
+  fit3 <- eBayes(fit2)
+  
+  # Results
+  res <- topTable(fit3, coef = "CNTvsOPTN",
+                  number = Inf, sort.by = "P")
+  
+  res <- res %>%
+    as_tibble(rownames = "gene") %>%
+    mutate(
+      category = case_when(
+        adj.P.Val < adjP_threshold & logFC > logFC_threshold ~ "upregulated",
+        adj.P.Val < adjP_threshold & logFC < -logFC_threshold ~ "downregulated",
+        TRUE ~ "n.s."
+      ),
+      subset = key
+    )
+  
+  list(
+    fit = fit3,
+    sample_info = sample_info,
+    design = design,
+    cnt_group = cnt_group,
+    optn_group = optn_group,
+    results = res
+  )
+}
+
+```
+
+```{r function-volcano, include=FALSE}
+
+plot_volcano_limma <- function(limma_res, 
+                               logFC_threshold = 0.25,
+                               adjP_threshold = 0.05,
+                               export = FALSE,
+                               sig_genes) {
+  
+  res <- limma_res$results
+  res$gene  <- sub(" .*", "", res$gene)
+  
+  if (export == FALSE){
+    
+    p <- ggplot(res, aes(x = logFC, y = -log10(adj.P.Val), 
+                       color = category, text = gene)) + 
+    geom_point(alpha = 0.95, size = 1.5) +
+    theme_minimal() + 
+    geom_hline(yintercept = -log10(adjP_threshold), linetype = 2,
+               color = screefill) +
+    geom_vline(xintercept = logFC_threshold, linetype = 2, color = screefill) +
+    geom_vline(xintercept = -logFC_threshold, linetype = 2, color = screefill) +
+    scale_color_manual(values = c(
+      "upregulated" = upfill,
+      "downregulated" = downfill,
+      "n.s." = nsfill
+    )) +
+    labs(
+      title = paste("Limma:", unique(res$subset), "- CNT vs OPTN"),
+      x = "log2 Fold Change (OPTN - CNT)",
+      y = "-log10(adjusted P-value)"
+    ) +
+    theme(legend.position = "bottom")
+  
+  return(ggplotly(p, tooltip = "text"))
+    
+  } else {
+    
+    top5_up <- res %>%
+      filter(category == "upregulated") %>%
+      slice_max(logFC, n = 5)
+    top5_down <- res %>%
+      filter(category == "downregulated") %>%
+      slice_max(abs(logFC), n = 5)
+
+    topsig_genes <- bind_rows(top5_up, top5_down)
+    
+    p <- ggplot(res, aes(x = logFC, y = -log10(adj.P.Val), 
+                       color = category, text = gene)) + 
+    geom_point(alpha = 0.95, size = 1.5) +
+    theme_minimal() + 
+    geom_hline(yintercept = -log10(adjP_threshold), linetype = 2,
+               color = screefill) +
+    geom_vline(xintercept = logFC_threshold, linetype = 2, color = screefill) +
+    geom_vline(xintercept = -logFC_threshold, linetype = 2, color = screefill) +
+    scale_color_manual(values = c(
+      "upregulated" = upfill,
+      "downregulated" = downfill,
+      "n.s." = nsfill
+    )) +
+    labs(
+      title = paste("Limma:", unique(res$subset), "- CNT vs OPTN"),
+      x = "log2 Fold Change (OPTN - CNT)",
+      y = "-log10(adjusted P-value)"
+    ) +
+    xlim(-2.4, 2.4) +
+    ylim(0, 3.8) +
+    ggrepel::geom_label_repel(data = topsig_genes, aes(label = gene),
+                     size = 4, box.padding = 0.4,
+                     point.padding = 0.6,
+                     min.segment.length = 0,
+                     color = screefill,
+                     segment.color = grey[4],
+                     force = 1,
+                     segment.size = 0.1) +
+    theme(legend.position = "bottom",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+  
+  return(p)
+    
+  }
+  
+  
+}
+```
+
+```{r limma+volcano, fig.height=8, fig.width=12}
+
+limma_5d_cyto <- run_limma_subset(data_mat = norm_5d_cyto$data_swept,
+                                  batch = "5d",
+                                  fraction = "cyto")
+limma_5d_synap <- run_limma_subset(data_mat = norm_5d_synap$data_swept,
+                                   batch = "5d",
+                                   fraction = "synap")
+limma_4d_cyto <- run_limma_subset(data_mat = norm_4d_cyto$data_swept,
+                                  batch = "4d",
+                                  fraction = "cyto")
+limma_4d_synap <- run_limma_subset(data_mat = norm_4d_synap$data_swept,
+                                   batch = "4d",
+                                   fraction = "synap")
+
+# Volcano plots
+volcano_5d_cyto <- plot_volcano_limma(limma_5d_cyto)
+volcano_5d_cyto
+
+volcano_5d_synap <- plot_volcano_limma(limma_5d_synap)
+volcano_5d_synap
+
+volcano_4d_cyto <- plot_volcano_limma(limma_4d_cyto)
+volcano_4d_cyto
+
+volcano_4d_synap <- plot_volcano_limma(limma_4d_synap)
+volcano_4d_synap
+```
+
+```{r export results, include = FALSE, eval = FALSE}
+
+get_first_genes <- function(res) {
+  res %>%
+    mutate(first_gene = str_split_fixed(gene, " ", 2)[, 1]) %>%
+    dplyr::select(gene, first_gene, everything())
+}
+genes_up <- function(df){
+  df %>% 
+  filter(category == "upregulated") %>% 
+  pull(first_gene) %>%                                         
+  unique()
+} 
+genes_down <- function(df){
+  df %>% 
+  filter(category == "downregulated") %>% 
+  pull(first_gene) %>%                                         
+  unique()
+} 
+
+limma_5d_cyto_ex <- get_first_genes(limma_5d_cyto$results)
+limma_5d_synap_ex <- get_first_genes(limma_5d_synap$results)
+limma_4d_cyto_ex <- get_first_genes(limma_4d_cyto$results)
+limma_4d_synap_ex <- get_first_genes(limma_4d_synap$results)
+
+write.csv(limma_5d_cyto_ex, "limma_5d_cyto.csv", row.names = TRUE)
+write.csv(limma_5d_synap_ex, "limma_5d_synap.csv", row.names = TRUE)
+write.csv(limma_4d_cyto_ex, "limma_4d_cyto.csv", row.names = TRUE)
+write.csv(limma_4d_synap_ex, "limma_4d_synap.csv", row.names = TRUE)
+
+
+
+mgenes_5dc_up   <- genes_up(limma_5d_cyto_ex)
+mgenes_5dc_up   <- unique(mgenes_5dc_up[!is.na(mgenes_5dc_up)])
+mgenes_5dc_down <- genes_down(limma_5d_cyto_ex)
+mgenes_5dc_down <- unique(mgenes_5dc_down[!is.na(mgenes_5dc_down)])
+mgenes_5ds_up   <- genes_up(limma_5d_synap_ex)
+mgenes_5ds_up   <- unique(mgenes_5ds_up[!is.na(mgenes_5ds_up)])
+mgenes_5ds_down <- genes_down(limma_5d_synap_ex)
+mgenes_5ds_down <- unique(mgenes_5ds_down[!is.na(mgenes_5ds_down)])
+
+mgenes_4dc_up   <- genes_up(limma_4d_cyto_ex)
+mgenes_4dc_up   <- unique(mgenes_4dc_up[!is.na(mgenes_4dc_up)])
+mgenes_4dc_down <- genes_down(limma_4d_cyto_ex)
+mgenes_4dc_down <- unique(mgenes_4dc_down[!is.na(mgenes_4dc_down)])
+mgenes_4ds_up   <- genes_up(limma_4d_synap_ex)
+mgenes_4ds_up   <- unique(mgenes_4ds_up[!is.na(mgenes_4ds_up)])
+mgenes_4ds_down <- genes_down(limma_4d_synap_ex)
+mgenes_4ds_down <- unique(mgenes_4ds_down[!is.na(mgenes_4ds_down)])
+
+writeLines(mgenes_5dc_up, "syngo_5d_cyto_up.txt")
+writeLines(mgenes_5ds_up, "syngo_5d_synap_up.txt") 
+writeLines(mgenes_4dc_up, "syngo_4d_cyto_up.txt")
+writeLines(mgenes_4ds_up, "syngo_4d_synap_up.txt")
+writeLines(mgenes_5dc_down, "syngo_5d_cyto_down.txt")
+writeLines(mgenes_5ds_down, "syngo_5d_synap_down.txt") 
+writeLines(mgenes_4dc_down, "syngo_4d_cyto_down.txt")
+writeLines(mgenes_4ds_down, "syngo_4d_synap_down.txt")
+
+mgenes_5dc_up   <- paste(mgenes_5dc_up,   collapse = ",")
+mgenes_5dc_down <- paste(mgenes_5dc_down, collapse = ",")
+mgenes_5ds_up   <- paste(mgenes_5ds_up,   collapse = ",")
+mgenes_5ds_down <- paste(mgenes_5ds_down, collapse = ",")
+mgenes_4dc_up   <- paste(mgenes_4dc_up,   collapse = ",")
+mgenes_4dc_down <- paste(mgenes_4dc_down, collapse = ",")
+mgenes_4ds_up   <- paste(mgenes_4ds_up,   collapse = ",")
+mgenes_4ds_down <- paste(mgenes_4ds_down, collapse = ",")
+
+writeLines(mgenes_5dc_up,   "genes_5d_cyto_up.txt")
+writeLines(mgenes_5ds_up,   "genes_5d_synap_up.txt") 
+writeLines(mgenes_4dc_up,   "genes_4d_cyto_up.txt")
+writeLines(mgenes_4ds_up,   "genes_4d_synap_up.txt")
+writeLines(mgenes_5dc_down, "genes_5d_cyto_down.txt")
+writeLines(mgenes_5ds_down, "genes_5d_synap_down.txt") 
+writeLines(mgenes_4dc_down, "genes_4d_cyto_down.txt")
+writeLines(mgenes_4ds_down, "genes_4d_synap_down.txt")
+```
+
+## Venn and UpSet diagrams
+
+```{r venndata}
+
+
+cyto_4d <- read.csv("limma_4d_cyto.csv",
+                 row.names = 1,
+                 stringsAsFactors = FALSE)
+
+synap_4d <- read.csv("limma_4d_synap.csv",
+                  row.names = 1,
+                  stringsAsFactors = FALSE)
+
+
+cyto_5d <- read.csv("limma_5d_cyto.csv",
+                 row.names = 1,
+                 stringsAsFactors = FALSE)
+
+synap_5d <- read.csv("limma_5d_synap.csv",
+                  row.names = 1,
+                  stringsAsFactors = FALSE)
+
+
+get_up_genes <- function(df) {
+  listed <- df$first_gene[df$category == "upregulated"]
+  return(listed)
+}
+get_down_genes <- function(df) {
+  listed <- df$first_gene[df$category == "downregulated"]
+  return(listed)
+}
+
+cyto_4d_up <- get_up_genes(cyto_4d)
+synap_4d_up <- get_up_genes(synap_4d)
+cyto_5d_up <- get_up_genes(cyto_5d)
+synap_5d_up <- get_up_genes(synap_5d)
+
+cyto_4d_down <- get_down_genes(cyto_4d)
+synap_4d_down <- get_down_genes(synap_4d)
+cyto_5d_down <- get_down_genes(cyto_5d)
+synap_5d_down <- get_down_genes(synap_5d)
+
+```
+
+```{r VennEulerr, fig.height=8, fig.width=12}
+
+gene_sets_up <- list(
+  `4d up cyto`   = cyto_4d_up,
+  `4d up synap`  = synap_4d_up,
+  `5d up cyto`   = cyto_5d_up,
+  `5d up synap`  = synap_5d_up
+)
+gene_sets_down <- list(
+  `4d down cyto`   = cyto_4d_down,
+  `4d down synap`  = synap_4d_down,
+  `5d down cyto`   = cyto_5d_down,
+  `5d down synap`  = synap_5d_down
+)
+
+
+# Fit Euler/Venn model
+fit_up <- euler(gene_sets_up)
+fit_down <- euler(gene_sets_down)
+
+# Plot
+Vennup <- plot(
+  fit_up,
+  fills = list(fill = vennfillup, alpha = 0.75),
+  labels = list(col = "black", cex = 0.8),
+  edges = list(col = nsfill),
+  quantities = list(type = "counts", cex = 0.7),
+  main = "Overlap of upregulated genes in 4d and 5d synap and cyto"
+)
+Venndown <- plot(
+  fit_down,
+  fills = list(fill = vennfilldown, alpha = 0.75),
+  labels = list(col = "black", cex = 0.8),
+  edges = list(col = nsfill),
+  quantities = list(type = "counts", cex = 0.7),
+  main = "Overlap of downregulated genes in 4d and 5d synap and cyto"
+)
+
+Vennup
+Venndown
+```
+
+```{r UpSet, fig.height=8, fig.width=12}
+
+# Convert to incidence data frame
+up_df <- fromList(gene_sets_up)
+down_df <- fromList(gene_sets_down)
+
+
+upset_up <- upset(
+  up_df,
+  nsets = 4,
+  nintersects = 11,
+  sets = colnames(up_df),
+  order.by = "degree",
+  keep.order = TRUE,
+  matrix.color = upfill,
+  main.bar.color = screefill,
+  sets.bar.color = screefill,
+  shade.color = nsfill,
+  mainbar.y.label = "Intersecting upregulated genes",
+  sets.x.label = "Genes per subset",
+  set_size.show = TRUE,
+  text.scale = c(1.3, 1, 1.3, 1.1, 1.3, 1.1)
+)
+
+upset_down <- upset(
+  down_df,
+  nsets = 4,
+  nintersects = 11,
+  sets = colnames(down_df),
+  order.by = "degree",
+  keep.order = TRUE,
+  matrix.color = downfill,
+  main.bar.color = screefill,
+  sets.bar.color = screefill,
+  shade.color = nsfill,
+  mainbar.y.label = "Intersecting downregulated genes",
+  sets.x.label = "Genes per subset",
+  set_size.show = TRUE,
+  text.scale = c(1.3, 1, 1.3, 1.1, 1.3, 1.1)
+)
+
+upset_up
+upset_down
+```
+
+```{r shared, include = FALSE, eval = FALSE}
+
+shared_genes_cyto_up <- intersect(cyto_4d_up, cyto_5d_up)
+shared_genes_synap_up <- intersect(synap_4d_up, synap_5d_up)
+shared_genes_cyto_down <- intersect(cyto_4d_down, cyto_5d_down)
+shared_genes_synap_down <- intersect(synap_4d_down, synap_5d_down)
+
+# 4d cyto
+top5_up_4d_cyto <- limma_4d_cyto$results %>%
+  filter(category == "upregulated") %>%
+  slice_max(logFC, n = 5)
+
+top5_down_4d_cyto <- limma_4d_cyto$results %>%
+  filter(category == "downregulated") %>%
+  slice_max(abs(logFC), n = 5)
+
+# 4d synap
+top5_up_4d_synap <- limma_4d_synap$results %>%
+  filter(category == "upregulated") %>%
+  slice_max(logFC, n = 5)
+
+top5_down_4d_synap <- limma_4d_synap$results %>%
+  filter(category == "downregulated") %>%
+  slice_max(abs(logFC), n = 5)
+
+# 5d synap
+top5_up_5d_synap <- limma_5d_synap$results %>%
+  filter(category == "upregulated") %>%
+  slice_max(logFC, n = 5)
+
+top5_down_5d_synap <- limma_5d_synap$results %>%
+  filter(category == "downregulated") %>%
+  slice_max(abs(logFC), n = 5)
+
+#5d cyto 
+top5_up_5d_cyto <- limma_5d_cyto$results %>%
+      filter(category == "upregulated") %>%
+      slice_max(logFC, n = 5)
+top5_down_5d_cyto <- limma_5d_cyto$results %>%
+      filter(category == "downregulated") %>%
+      slice_max(abs(logFC), n = 5)
+
+toplimma_genes <- bind_rows(top5_up_4d_cyto, top5_up_4d_synap, top5_up_5d_cyto, top5_up_5d_synap,
+                          top5_down_4d_cyto, top5_down_4d_synap, top5_down_5d_cyto, top5_down_5d_synap)
+
+toplimma_genes$gene  <- sub(" .*", "", toplimma_genes$gene)
+
+limmatopgenes <- unique(toplimma_genes$gene)
+```
+
+```{r export-figures, include = FALSE, eval = FALSE}
+
+
+#4d cyto
+boxhist_4c  <- plot_signal_intensity_dis(norm_4d_cyto$data_piv_swept, "4d cyto")
+boxhist_4c  <- (boxhist_4c$box | boxhist_4c$hist) 
+dens_4c     <- plot_intensity_density(norm_4d_cyto$data_piv_swept, "4d cyto")
+
+ggsave("boxhist_4c.pdf", boxhist_4c, device = "pdf",
+       dpi = 400, width = 20, height = 10, units = "cm", limitsize = FALSE)
+ggsave("dens_4c.pdf", dens_4c, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm", limitsize = FALSE)
+
+# 4d synap
+boxhist_4s  <- plot_signal_intensity_dis(norm_4d_synap$data_piv_swept, "4d synap")
+boxhist_4s  <- (boxhist_4s$box | boxhist_4s$hist) 
+dens_4s     <- plot_intensity_density(norm_4d_synap$data_piv_swept, "4d synap")
+
+ggsave("boxhist_4s.pdf", boxhist_4s, device = "pdf",
+       dpi = 400, width = 20, height = 10, units = "cm", limitsize = FALSE)
+ggsave("dens_4s.pdf", dens_4s, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm", limitsize = FALSE)
+
+# 5d cyto
+boxhist_5c <- plot_signal_intensity_dis(norm_5d_cyto$data_piv_swept, "5d cyto")
+boxhist_5c  <- (boxhist_5c$box | boxhist_5c$hist) 
+dens_5c    <- plot_intensity_density(norm_5d_cyto$data_piv_swept, "5d cyto")
+
+ggsave("boxhist_5c.pdf", boxhist_5c, device = "pdf",
+       dpi = 400, width = 20, height = 10, units = "cm", limitsize = FALSE)
+ggsave("dens_5c.pdf", dens_5c, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm", limitsize = FALSE)
+
+# 5d synap
+boxhist_5s <- plot_signal_intensity_dis(norm_5d_synap$data_piv_swept, "5d synap")
+boxhist_5s  <- (boxhist_5s$box | boxhist_5s$hist) 
+dens_5s    <- plot_intensity_density(norm_5d_synap$data_piv_swept, "5d synap")
+
+ggsave("boxhist_5s.pdf", boxhist_5s, device = "pdf",
+       dpi = 400, width = 20, height = 10, units = "cm", limitsize = FALSE)
+ggsave("dens_5s.pdf", dens_5s, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm", limitsize = FALSE)
+
+
+
+
+all_PCA_plot <- (pca_combined$scree_plot / pca_combined$pca_plot) + plot_layout(guides = "collect")
+
+ggsave("PCA_4d_synap.pdf", pca_4d_synap, device = "pdf",
+       dpi = 400, width = 20, height = 16, units = "cm")
+
+ggsave("PCA_4d_cyto.pdf", pca_4d_cyto, device = "pdf",
+       dpi = 400, width = 20, height = 16, units = "cm")
+
+ggsave("PCA_5d_cyto.pdf", pca_5d_cyto, device = "pdf", 
+       dpi = 400, width = 20, height = 16, units = "cm")
+
+ggsave("PCA_5d_synap.pdf", pca_5d_synap, device = "pdf",
+       dpi = 400, width = 20, height = 16, units = "cm")
+
+ggsave("PCA_all.pdf", all_PCA_plot, device = "pdf",
+       dpi = 400, width = 20, height = 16, units = "cm")
+
+
+
+
+ggsave("vennup.pdf", Vennup, device = "pdf",
+       dpi = 400, width = 20, height = 15, units = "cm")
+ggsave("venndown.pdf", Venndown, device = "pdf",
+       dpi = 400, width = 20, height = 15, units = "cm")
+pdf("upsetup.pdf", width = 20/2.54, height = 15/2.54)  # 20x15 cm = crisp vector
+upset_up
+dev.off()
+pdf("upsetdown.pdf", width = 20/2.54, height = 15/2.54)  # 20x15 cm = crisp vector
+upset_down
+dev.off()
+
+
+
+
+sig<- c("Rtn3")
+## remove these and replace them with your own protein
+
+
+volcano_5d_cyto <- plot_volcano_limma(limma_res = limma_5d_cyto,
+                                      export = TRUE)
+
+volcano_5d_synap <- plot_volcano_limma(limma_res = limma_5d_synap,
+                                      export = TRUE,
+                                      sig_gene = sig)
+
+volcano_4d_cyto <- plot_volcano_limma(limma_res = limma_4d_cyto,
+                                      export = TRUE,
+                                      sig_gene = sig)
+
+volcano_4d_synap <- plot_volcano_limma(limma_res = limma_4d_synap,
+                                      export = TRUE,
+                                      sig_gene = sig)
+
+
+all_volcano_plot <- (volcano_4d_cyto | volcano_4d_synap)  /
+                    (volcano_5d_cyto | volcano_5d_synap) +
+  plot_layout(guides = "collect", ncol = 2)
+
+
+
+ggsave("volcano_4d_synap.pdf", volcano_4d_synap, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm")
+
+ggsave("volcano_4d_cyto.pdf", volcano_4d_cyto, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm")
+
+ggsave("volcano_5d_cyto.pdf", volcano_5d_cyto, device = "pdf", 
+       dpi = 400, width = 20, height = 20, units = "cm")
+
+ggsave("volcano_5d_synap.pdf", volcano_5d_synap, device = "pdf",
+       dpi = 400, width = 20, height = 20, units = "cm")
+
+
+
+```
